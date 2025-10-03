@@ -4,7 +4,8 @@ from typing import List, Dict, Optional
 import re
 import uuid
 import snowflake.connector
-from snowflake_utils import query_snowflake
+from snowflake_utils import query_snowflake, upsert_to_snowflake, write_to_snowflake
+import datetime as dt
 
 def _clean_text(text: str) -> str:
     """Helper function to clean text strings"""
@@ -200,3 +201,114 @@ def get_existing_entities(conn: Optional[snowflake.connector.SnowflakeConnection
 
     print(f"✓ Loaded {len(entities)} existing entities from Snowflake")
     return entities
+
+def _validate_entity(entity: dict) -> bool:
+    """
+    Validate that an entity has required fields
+
+    Args:
+        entity: Dictionary representing an entity
+
+    Returns:
+        True if valid, False otherwise
+    """
+    # Check for entity_type
+    if 'entity_type' not in entity or not entity['entity_type']:
+        return False
+
+    # Check for at least one identifier field
+    identifier_fields = ['name', 'email', 'phone', 'website', 'linkedin_url']
+    has_identifier = any(
+        field in entity and entity[field] and str(entity[field]).strip()
+        for field in identifier_fields
+    )
+    return has_identifier
+
+
+def ingest_entities(entities: List[Dict]) -> List[Dict]:
+    """
+    Ingest a list of entities by resolving them against existing entities and upserting to Snowflake.
+
+    This function validates entities, performs entity resolution to identify matches with existing entities,
+    merges entity information, and persists updates to Snowflake. It handles both new entities and updates
+    to existing ones, consolidating entity_types and merging field values.
+
+    Args:
+        entities: List of entity dictionaries to ingest. Each must have 'entity_type' and at least
+                 one identifier field (name, email, phone, website, linkedin_url)
+        existing_entities: List of known entity dictionaries from Snowflake. Will be mutated to include
+                          new entities and updates
+
+    Returns:
+        None. Side effects include:
+        - Updates to existing_entities list (mutates in place)
+        - Upserts to RDH.PUBLIC.ENTITIES_RESOLVED table in Snowflake
+        - Writes processing log to RDH.PUBLIC.ENTITY_RESOLUTION_LOG table
+    """
+    existing_entities = get_existing_entities()
+    valid_entities = [x for x in entities if _validate_entity(x)]
+    invalid_entities = [x for x in entities if not _validate_entity(x)]
+
+    entity_matching_fields = ['entity_id', 'name', 'email', 'phone', 'website', 'linkedin_url', 'address']
+
+    # compare valid entities vs. existing
+    updates = {}
+    for this_entity in valid_entities:
+        this_resolved = resolve_entity(this_entity, existing_entities, threshold=0.7)
+        if 'best_match' not in this_resolved.keys(): continue
+
+        for field in entity_matching_fields:
+            this_entity.setdefault(field, None)
+        this_entity.setdefault('entity_types', [])
+
+        if this_resolved['is_new']:
+            new_entity = this_entity['best_match']
+            new_entity['entity_id'] = this_resolved['entity_id']
+            new_entity['entity_types'] = [this_entity['entity_type']]
+            new_entity.pop('entity_type', None)
+            new_entity['event_type'] = 'CREATE'
+            updates[new_entity['entity_id']] = new_entity
+            existing_entities.append(new_entity)
+        else:
+            existing_entity = \
+            [x for x in existing_entities if x['entity_id'] == this_resolved['best_match']['entity']['entity_id']][0]
+            existing_entity['name'] = existing_entity['name'] if 'name' in existing_entity.keys() and existing_entity[
+                'name'] is not None else this_entity['name']
+            existing_entity['email'] = existing_entity['email'] or this_entity['email']
+            existing_entity['phone'] = existing_entity['phone'] or this_entity['phone']
+            existing_entity['website'] = existing_entity['website'] or this_entity['website']
+            existing_entity['linkedin_url'] = existing_entity['linkedin_url'] or this_entity['linkedin_url']
+            if not this_entity['entity_type'] in existing_entity['entity_types']:
+                existing_entity['entity_types'].append(this_entity['entity_type'])
+            existing_entity['event_type'] = 'UPDATE'
+            updates[existing_entity[
+                'entity_id']] = existing_entity  # this will overwrite each time through if more info gets added
+
+    # make updates to snowflake
+    updates_df = pd.DataFrame([x for x in updates.values()])
+    updates_df.columns = updates_df.columns.str.upper()
+    upsert_to_snowflake(updates_df, table_name='ENTITIES_RESOLVED', key_columns=['entity_id'], database='RDH',
+                        schema='PUBLIC')
+
+    # write processed entities to a log
+    log_entries = pd.concat([
+        pd.DataFrame({
+            'entry': valid_entities,
+            'is_valid': [1] * len(valid_entities),
+            'update_ts': [dt.datetime.now(dt.timezone.utc)] * len(valid_entities)
+        }),
+        pd.DataFrame({
+            'entry': invalid_entities,
+            'is_valid': [0] * len(invalid_entities),
+            'update_ts': [dt.datetime.now(dt.timezone.utc)] * len(invalid_entities)
+        })
+    ], ignore_index=True)
+
+    write_to_snowflake(
+        df=log_entries,
+        table_name='ENTITY_RESOLUTION_LOG',
+        database='RDH',
+        schema='PUBLIC',
+        auto_create_table=True
+    )
+    return(updates)
