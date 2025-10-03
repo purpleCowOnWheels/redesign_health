@@ -1,9 +1,10 @@
-import pandas as pd, pdb
+import pandas as pd, pdb, json
 import recordlinkage
-from recordlinkage.preprocessing import clean, phonetic
 from typing import List, Dict, Optional
 import re
-
+import uuid
+import snowflake.connector
+from snowflake_utils import query_snowflake
 
 def _clean_text(text: str) -> str:
     """Helper function to clean text strings"""
@@ -51,6 +52,7 @@ def resolve_entity(
         - best_match: The highest scoring match (if any)
         - is_new: Boolean indicating if this is likely a new entity
         - confidence: Confidence score of best match
+        - entity_id: a GUID for the entity
     """
     
     if not known_entities:
@@ -58,14 +60,15 @@ def resolve_entity(
             'matches': [],
             'best_match': None,
             'is_new': True,
-            'confidence': 0.0
+            'confidence': 0.0,
+            'entity_id': str(uuid.uuid4())  # Generate new UUID for new entity
+
         }
     
     # Convert to DataFrames
     df_new = pd.DataFrame([entity], index=[0])
     df_known = pd.DataFrame(known_entities)
     df_known.index = df_known.index.astype(str)
-    
     # Clean and preprocess data
     for df in [df_new, df_known]:
         if 'name' in df.columns:
@@ -76,6 +79,8 @@ def resolve_entity(
             df['phone_clean'] = df['phone'].fillna('').apply(_clean_string_generic)
         if 'linkedin_url' in df.columns:
             df['linkedin_clean'] = df['linkedin_url'].fillna('').apply(_clean_string_generic)
+        if 'website' in df.columns:
+            df['website_clean'] = df['website'].fillna('').apply(_clean_string_generic)
         if 'address' in df.columns:
             df['address_clean'] = df['address'].fillna('').apply(_clean_string_generic)
     
@@ -110,21 +115,25 @@ def resolve_entity(
     if 'linkedin_url' in df_new.columns and 'linkedin_url' in df_known.columns:
         compare.exact('linkedin_clean', 'linkedin_clean', label='linkedin_url')
     
+    if 'website' in df_new.columns and 'website' in df_known.columns:
+        compare.exact('website_clean', 'website_clean', label='website')
+    
     if 'address' in df_new.columns and 'address' in df_known.columns:
         compare.string('address_clean', 'address_clean', method='jarowinkler', label='address')
     
     # Compute comparison scores
     features = compare.compute(candidate_pairs, df_new, df_known)
-    
+
     # Calculate weighted scores
     weights = {
         'email': 0.35,
         'phone': 0.30,
         'linkedin_url': 0.25,
         'name': 0.07,
-        'address': 0.03
+        'address': 0.03,
+        'website': 0.25,
     }
-    perfect_matches = ['phone', 'email', 'linkedin_url']
+    perfect_matches = ['phone', 'email', 'linkedin_url', 'website']
 
     # Calculate total score for each match
     matches = []
@@ -155,9 +164,39 @@ def resolve_entity(
     best_match = matches[0] if matches else None
     is_new = len(matches) == 0
 
+    if is_new or 'id' not in best_match['entity']:
+        entity_id = str(uuid.uuid4())  # Convert to string
+    else:
+        entity_id = best_match['entity']['id']
+    
     return {
         'matches': matches,
         'best_match': best_match,
         'is_new': is_new,
-        'confidence': best_match['confidence'] if best_match else 0.0
+        'confidence': best_match['confidence'] if best_match else 0.0,
+        'entity_id': entity_id
     }
+
+def get_existing_entities(conn: Optional[snowflake.connector.SnowflakeConnection] = None) -> List[Dict]:
+    """
+    Get existing entities from Snowflake as a list of dictionaries
+    
+    Args:
+        conn: Optional Snowflake connection
+        
+    Returns:
+        List of entity dictionaries
+    """
+    df = query_snowflake('SELECT * FROM RDH.PUBLIC.ENTITIES_RESOLVED', conn=conn)
+    df.columns = df.columns.str.lower()
+    # Convert to list of dicts and replace NaN with None
+    entities = df.replace({pd.NA: None}).to_dict('records')
+
+    for entity in entities:
+        try:
+            entity['entity_types'] = [ ] if( entity['entity_types'] is None) else json.loads(entity['entity_types'])
+        except:
+            pdb.set_trace()
+
+    print(f"✓ Loaded {len(entities)} existing entities from Snowflake")
+    return entities

@@ -356,6 +356,63 @@ class TestResolveEntity:
         # Should not match - email is different despite phone matching
         assert result['is_new'] == True
 
+    def test_match_by_website(self):
+        """Test matching by website URL"""
+        entity = {
+            'name': 'TechCorp Inc',
+            'email': 'contact@techcorp.com',
+            'phone': None,
+            'linkedin_url': None,
+            'website': 'https://www.techcorp.com',
+            'address': None
+        }
+
+        known_entities = [
+            {
+                'name': 'TechCorp',
+                'email': 'info@techcorp.com',
+                'phone': None,
+                'linkedin_url': None,
+                'website': 'http://techcorp.com',  # Same site, different protocol/www
+                'address': None
+            }
+        ]
+
+        result = resolve_entity(entity, known_entities, threshold=0.5)
+
+        assert result['is_new'] == False
+        assert result['best_match'] is not None
+        assert 'website' in result['best_match']['matching_fields']
+        assert result['best_match']['matching_fields']['website'] == 1.0
+
+    def test_different_websites_no_match(self):
+        """Test that different websites don't cause false matches"""
+        entity = {
+            'name': 'Company A',
+            'email': None,
+            'phone': None,
+            'linkedin_url': None,
+            'website': 'https://companya.com',
+            'address': None
+        }
+
+        known_entities = [
+            {
+                'name': 'Company A',
+                'email': None,
+                'phone': None,
+                'linkedin_url': None,
+                'website': 'https://companyb.com',
+                'address': None
+            }
+        ]
+
+        result = resolve_entity(entity, known_entities, threshold=0.7)
+
+        # Should not match - only name is similar, website is different
+        assert result['is_new'] == True
+        assert result['confidence'] < 0.1
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
