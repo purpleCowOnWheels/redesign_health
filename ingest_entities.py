@@ -12,6 +12,8 @@ for json_file in Path(directory_path).glob("*.json"):
         data = json.load(f)
         all_entities.extend(data if isinstance(data, list) else [data])
 
+if not len(all_entities): exit(0)
+
 ingest_entities(all_entities)
 
 #move processed entities into the processed folder

@@ -63,9 +63,12 @@ def resolve_entity(
             'is_new': True,
             'confidence': 0.0,
             'entity_id': str(uuid.uuid4())  # Generate new UUID for new entity
-
         }
-    
+
+    entity = {k: v for k, v in entity.items() if v is not None and len(v)}
+    assert len(entity.keys())
+    known_entities = [{k: v for k, v in e.items() if k in entity.keys() or k in ['entity_id']} for e in known_entities]
+
     # Convert to DataFrames
     df_new = pd.DataFrame([entity], index=[0])
     df_known = pd.DataFrame(known_entities)
@@ -104,27 +107,26 @@ def resolve_entity(
     compare = recordlinkage.Compare()
     
     # Add comparison rules
-    if 'name' in df_new.columns and 'name' in df_known.columns:
+    if 'name' in df_new.columns:
         compare.string('name_clean', 'name_clean', method='jarowinkler', label='name')
     
-    if 'email' in df_new.columns and 'email' in df_known.columns:
+    if 'email' in df_new.columns:
         compare.exact('email_clean', 'email_clean', label='email')
-    
-    if 'phone' in df_new.columns and 'phone' in df_known.columns:
+
+    if 'phone' in df_new.columns:
         compare.exact('phone_clean', 'phone_clean', label='phone')
     
-    if 'linkedin_url' in df_new.columns and 'linkedin_url' in df_known.columns:
+    if 'linkedin_url' in df_new.columns:
         compare.exact('linkedin_clean', 'linkedin_clean', label='linkedin_url')
     
-    if 'website' in df_new.columns and 'website' in df_known.columns:
+    if 'website' in df_new.columns:
         compare.exact('website_clean', 'website_clean', label='website')
     
-    if 'address' in df_new.columns and 'address' in df_known.columns:
+    if 'address' in df_new.columns:
         compare.string('address_clean', 'address_clean', method='jarowinkler', label='address')
     
     # Compute comparison scores
     features = compare.compute(candidate_pairs, df_new, df_known)
-
     # Calculate weighted scores
     weights = {
         'email': 0.35,
@@ -262,7 +264,7 @@ def ingest_entities(entities: List[Dict]) -> List[Dict]:
         this_entity.setdefault('entity_types', [])
 
         if this_resolved['is_new']:
-            new_entity = this_entity['best_match']
+            new_entity = this_entity
             new_entity['entity_id'] = this_resolved['entity_id']
             new_entity['entity_types'] = [this_entity['entity_type']]
             new_entity.pop('entity_type', None)

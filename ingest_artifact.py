@@ -7,8 +7,15 @@ from snowflake_utils import upsert_to_snowflake
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv('OPEN_AI_API_KEY'))
+model = os.getenv("OPENAI_MODEL", "gpt-4.1")  # set to a model you have access to
 
-artifact = 'https://www.linkedin.com/in/lelandbrewster/'
+#artifact = 'https://www.linkedin.com/in/lelandbrewster/'
+#artifact = 'https://www.linkedin.com/in/aronszanto/'
+#artifact = 'https://www.businessinsider.com/citigroup-md-data-science-daniel-costanza-dealmaking-investment-bank-2020-12'
+
+artifact_location = r"C:\Users\danie\Dropbox\Personal\Jobs\Company Specific Docs\Redesign_Health\artifacts\crew.txt"
+with open(artifact_location, "r", encoding="utf-8") as f:
+    artifact = f.read()
 
 prompt = f"""
 can you please parse this artifact:
@@ -81,41 +88,46 @@ Every Source and Target should appear as a Name in a Node.
 
 All Artifact Dates should be actual dates in the format YYYY-MM-DD. If you do not know the exact date pick a near-enough one.
 
-For every entity you find, please also extend the graph by 1 degree of separation
+For every entity you find, please also extend the graph by 1 degrees of separation
 
 """
-
+print('Prompt sent to GPT. Waiting for response...')
+prompt_sent = dt.datetime.now()
 response = client.chat.completions.create(
-    model="gpt-4.1",  # full
-    # model = 'gpt-4o-mini', #light
-    messages=[
-        {"role": "system", "content": "You are an assistant that outputs structured JSON only."},
-        {"role": "user", "content": prompt}
-    ],
-    temperature=0  # deterministic, good for structured output
-)
+        model=model,
+        response_format={"type": "json_object"},  # or json_schema (best)
+        messages=[
+            {"role": "system", "content": "Return only valid JSON. No prose, no markdown."},
+            {"role": "user", "content": prompt}
+        ],
+        max_completion_tokens=4000,
+        seed=7,
+        n=1
+    )
+
+print( 'GPT executed in :' + str(dt.datetime.now() - prompt_sent))
+
 raw_text = response.choices[0].message.content
-# parse it into Python dict
+
 try:
     json_output = json.loads(raw_text)
 except json.JSONDecodeError as e:
+    print("Raw text:", raw_text)
     print("❌ Failed to parse JSON:", e)
-    print("Raw output:", raw_text)
 resolved_entities = ingest_entities(json_output['nodes'])
 
 #swap in the entity id for each node and edge
 
 name_to_id = {v["name"]: v["entity_id"] for v in resolved_entities.values()}
 # replace edge endpoints with ids
+print(name_to_id)
 
 edges = json_output["edges"].copy()
 for e in edges:
     if e['source'] not in name_to_id or e['target'] not in name_to_id: continue
-    e[source] = name_to_id[e['source']]
-    e[target] = name_to_id[e['target']]
+    e['source'] = name_to_id[e['source']]
+    e['target'] = name_to_id[e['target']]
 
 edges_df = pd.DataFrame(edges)
 edges_df.columns = edges_df.columns.str.upper()
 upsert_to_snowflake(edges_df, table_name='KNOWLEDGE_GRAPH', key_columns=['SOURCE', 'TARGET', 'RELATIONSHIP', 'ARTIFACT'], database='RDH', schema='PUBLIC')
-
-pdb.set_trace()
