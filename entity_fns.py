@@ -201,7 +201,7 @@ def get_existing_entities(conn: Optional[snowflake.connector.SnowflakeConnection
         except:
             pdb.set_trace()
 
-    print(f"✓ Loaded {len(entities)} existing entities from Snowflake")
+    #print(f"✓ Loaded {len(entities)} existing entities from Snowflake")
     return entities
 
 def _validate_entity(entity: dict) -> bool:

@@ -21,10 +21,10 @@ def get_snowflake_connection():
             password=os.getenv('SNOWFLAKE_PASSWORD'),
             role=os.getenv('SNOWFLAKE_ROLE')
         )
-        print("Successfully connected to Snowflake")
+        #print("Successfully connected to Snowflake")
         return conn
     except Exception as e:
-        print(f"Error connecting to Snowflake: {e}")
+        #print(f"Error connecting to Snowflake: {e}")
         raise
 
 def query_snowflake(
@@ -44,13 +44,12 @@ def query_snowflake(
     # Create connection if not provided
     if conn is None:
         conn = get_snowflake_connection()
-        print('Successfully connected to Snowflake')
     try:
         cur = conn.cursor()
-        print('Executing query...')
+        #print('Executing query...')
         cur.execute(sql)
         df = cur.fetch_pandas_all()
-        print(f'Query successful. Returning {len(df)} rows.')
+        #print(f'Query successful. Returning {len(df)} rows.')
         return df
     finally:
         cur.close()
@@ -103,7 +102,7 @@ def write_to_snowflake(
             cursor = conn.cursor()
             cursor.execute(f"TRUNCATE TABLE IF EXISTS {table_name}")
             cursor.close()
-            print(f"Truncated table {table_name}")
+            #print(f"Truncated table {table_name}")
         
         # Write data using pandas tools
         success, nchunks, nrows, _ = write_pandas(
@@ -115,10 +114,10 @@ def write_to_snowflake(
         )
         
         if success:
-            print(f"Successfully wrote {nrows} rows to {table_name} in {nchunks} chunks")
+            #print(f"Successfully wrote {nrows} rows to {table_name} in {nchunks} chunks")
             return nrows
         else:
-            print(f"Failed to write to {table_name}")
+            #print(f"Failed to write to {table_name}")
             return 0
             
     finally:
@@ -167,7 +166,7 @@ def upsert_to_snowflake(
         temp_table = f"{table_name}_TEMP_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S')}"
         
         # Write to temporary table
-        print(f"Writing to temporary table {temp_table}...")
+        #print(f"Writing to temporary table {temp_table}...")
         write_pandas(
             conn=conn,
             df=df,
@@ -202,7 +201,7 @@ def upsert_to_snowflake(
             VALUES ({insert_values})
         """
         
-        print(f"Executing MERGE statement...")
+        #print(f"Executing MERGE statement...")
         cursor.execute(merge_sql)
         rows_affected = cursor.rowcount
         
@@ -210,7 +209,7 @@ def upsert_to_snowflake(
         cursor.execute(f"DROP TABLE IF EXISTS {temp_table.upper()}")
         
         cursor.close()
-        print(f"Upsert complete. {rows_affected} rows affected.")
+        #print(f"Upsert complete. {rows_affected} rows affected.")
         
         return rows_affected
         
@@ -300,7 +299,7 @@ def execute_sql(
         rows_affected = cursor.rowcount
         cursor.close()
         
-        print(f"SQL executed successfully. {rows_affected} rows affected.")
+        #print(f"SQL executed successfully. {rows_affected} rows affected.")
         return rows_affected
         
     finally:

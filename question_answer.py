@@ -1,36 +1,25 @@
 """
 Q&A over a small knowledge graph using OpenAI's Responses API.
-
-Setup:
-  pip install --upgrade openai
-  export OPENAI_API_KEY=sk-...
-  # Optionally:
-  export OPENAI_MODEL=gpt-5.1  # or another available model
-Docs:
-  - OpenAI Python SDK + Responses API examples:
-    https://github.com/openai/openai-python
-  - API reference:
-    https://platform.openai.com/docs/api-reference
 """
 
 import os
-import json, pdb, datetime as dt
+import json, pdb, datetime as dt, sys
 from openai import OpenAI
 from snowflake_utils import query_snowflake
 from dotenv import load_dotenv
 
 load_dotenv()
 
+prompt_sent = dt.datetime.now()
+
 #get relevant nodes
-nodes = query_snowflake("SELECT ENTITY_ID, NAME, ENTITY_TYPES FROM RDH.PUBLIC.ENTITIES_RESOLVED WHERE 1=1")
+nodes = query_snowflake("SELECT ENTITY_ID, PROFILE FROM RDH.PUBLIC.ENTITIES WHERE 1=1")
 nodes = nodes.to_dict('records')
 
 edges = query_snowflake("SELECT SOURCE, TARGET, RELATIONSHIP, RELATIONSHIP_STRENGTH FROM RDH.PUBLIC.knowledge_graph WHERE 1=1")
 edges = edges.to_dict('records')
 
-#question = "Does Aron know Leland Brewster?"
-#question = "How well does Aron know Leland Brewster?"
-question = "What types of companies does Redsign Health like to invest in? Are there any companies they are not directly affiliated with but could be interested in?"
+question =  user_input = sys.argv[1]
 
 # ---- Serialize graph ----------------------------------------------------
 graph_payload = {
@@ -50,6 +39,7 @@ system_instructions = (
     "- Prefer facts supported by the graph; augment with general knowledge as needed.\n"
     #"- Briefly cite which graph nodes/edges you used by id (e.g., n1→n3).\n"
     "- Answer strictly in simple terms. Never reference the graph itself, edges, nodes or other technical terms.\n"
+    "- Entities can be connected indirectly, not just with direct connections between their nodes.\n"
     "- Keep the answer under 200 words."
 
 )
@@ -65,8 +55,7 @@ user_prompt = (
 client = OpenAI(api_key=os.getenv("OPEN_AI_API_KEY"))
 model = os.getenv("OPENAI_MODEL", "gpt-4.1")  # set to a model you have access to
 
-print('Prompt sent to GPT. Waiting for response...')
-prompt_sent = dt.datetime.now()
+#print('Prompt sent to GPT. Waiting for response...')
 
 
 response = client.chat.completions.create(
@@ -75,11 +64,14 @@ response = client.chat.completions.create(
         {"role": "system", "content": "Return only valid JSON. No prose, no markdown."},
         {"role": "user", "content": user_prompt}
     ])
-print( 'GPT executed in :' + str(dt.datetime.now() - prompt_sent))
+elapsed = dt.datetime.now() - prompt_sent
+total_seconds = int(elapsed.total_seconds())
+minutes, seconds = divmod(total_seconds, 60)
+
+print(f"Query executed in: {minutes}m:{seconds:02d}s")
 
 raw_text = response.choices[0].message.content
 
-print("\n=== Answer ===\n")
 try:
     json_output = json.loads(raw_text)
     print(json.dumps(json_output, indent=2, ensure_ascii=False))
