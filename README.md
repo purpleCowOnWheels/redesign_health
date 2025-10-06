@@ -11,3 +11,12 @@ Critical helper scripts:
 Optional / less critical:
 entity_metadata gets public information on entities from ChatGPT. This has NOT been a reliable source of information and should be replaced by creating node-level data that just summarizes information available in the eisting knowledge graph
 ingest_entities allows for manual creation of entities in the knowledge graph (with appropriate resolution against existing entities)
+
+Requires a local .env file structured as follows:
+SNOWFLAKE_ACCOUNT=hjc76816.us-east-1
+SNOWFLAKE_USER=DCOSTANZA1
+SNOWFLAKE_PASSWORD=[****]
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+
+OPEN_AI_API_KEY=[****]
+OPENAI_MODEL=gpt-4.1
