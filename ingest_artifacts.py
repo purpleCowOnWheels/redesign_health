@@ -137,4 +137,3 @@ for artifact_location in Path(directory_path).glob("*.txt"):
     edges_df = pd.DataFrame(edges)
     edges_df.columns = edges_df.columns.str.upper()
     upsert_to_snowflake(edges_df, table_name='KNOWLEDGE_GRAPH', key_columns=['SOURCE', 'TARGET', 'RELATIONSHIP', 'ARTIFACT'], database='RDH', schema='PUBLIC')
-pdb.set_trace()

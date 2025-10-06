@@ -28,7 +28,7 @@ def run_script():
             cmd = [sys.executable, "-u", SCRIPT_PATH, user_input]
             # If calling a module instead of a file, use:
             # cmd = [sys.executable, "-u", "-m", "your.package.module", user_input]
-            root.after(0, append_output, f"=== {user_input} ===\n<< Processing query... >>\n")
+            root.after(0, append_output, f"=== {user_input} ===\n<< Working on it... >>\n")
             result = subprocess.run(
                 cmd,
                 capture_output=True,

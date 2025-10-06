@@ -7,10 +7,15 @@ load_dotenv()
 model = os.getenv("OPENAI_MODEL", "gpt-4.1")  # set to a model you have access to
 
 entities = query_snowflake(
-    f"""SELECT *
-FROM RDH.PUBLIC.ENTITIES_RESOLVED r
-LEFT JOIN RDH.PUBLIC.ENTITIES m on r.entity_id = m.entity_id
-WHERE M.ENTITY_ID IS NULL""")
+    f"""
+        SELECT  r.ENTITY_ID, r.NAME, r.website, r.linkedin_url
+        FROM RDH.PUBLIC.ENTITIES_RESOLVED r
+        LEFT JOIN RDH.PUBLIC.ENTITIES m on r.entity_id = m.entity_id
+        WHERE 1=1
+        --AND R.Name LIKE 'Aron%'
+        --AND M.ENTITY_ID IS NULL
+        AND NOT ( r.WEBSITE IS NULL AND r.LINKEDIN_URL IS NULL AND r.EMAIL IS NULL )
+""")
 
 if not len(entities): exit(0)
 
@@ -20,7 +25,7 @@ client = OpenAI(api_key=os.getenv('OPEN_AI_API_KEY'))
 entity_results = {}
 
 for indx, entity in enumerate(entities):
-    print(f'Querying chatgpt for {indx} of {len(entities)}')
+    print(f'Getting entity metadata for entity {indx} of {len(entities)}')
     prompt = f"""
     Summarize publicly available information about {entity}.
     Output strictly in JSON with this schema:
@@ -134,21 +139,26 @@ for indx, entity in enumerate(entities):
         temperature=0  # deterministic, good for structured output
     )
     raw_text = response.choices[0].message.content
+    pdb.set_trace()
     # parse it into Python dict
     try:
         json_output = json.loads(raw_text)
     except json.JSONDecodeError as e:
         print("❌ Failed to parse JSON:", e)
         print("Raw output:", raw_text)
+        continue
     entity_results[entity['ENTITY_ID']] = json_output
 
-# Convert dict → DataFrame
-df = pd.DataFrame([
-    {"ENTITY_ID": k, "PROFILE": v}  # stringify the value
-    for k, v in entity_results.items()
-])
-df['UPDATE_TS'] = dt.datetime.now(dt.timezone.utc)
+    if (indx % 10 == 0 and indx > 0) or indx == len(entities) - 1:
+        # Convert dict → DataFrame
+        print(f"  >> Upserting {len(entity_results)} entities to Snowflake")
+        df = pd.DataFrame([
+            {"ENTITY_ID": k, "PROFILE": v}  # stringify the value
+            for k, v in entity_results.items()
+        ])
+        #df['UPDATE_TS'] = dt.datetime.now(dt.timezone.utc)
 
-#upsert to Snowflake
-upsert_to_snowflake(df, table_name = 'ENTITIES', key_columns = ['ENTITY_ID'], database = 'RDH', schema = 'PUBLIC')
+        #upsert to Snowflake
+        upsert_to_snowflake(df, table_name = 'ENTITIES', key_columns = ['ENTITY_ID'], database = 'RDH', schema = 'PUBLIC')
+        entity_results = { }
 
